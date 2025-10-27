@@ -1,0 +1,335 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Authentication models
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions Session[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// Core F12OS models
+model Venture {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  description   String?
+  status        String?  // "ACTIVE", "PAUSED", "CLOSED"
+  website       String?
+  logo          String?
+
+  // Financial targets (from business plan)
+  targetMRR     Float?
+  targetARR     Float?
+
+  // Current financials (latest metric)
+  currentMRR    Float?   @default(0)
+  currentARR    Float?   @default(0)
+
+  // Ownership and valuation
+  f12Equity     Float?   @default(0)  // F12 Holdings equity %
+  valuation     Float?   @default(0)
+
+  // Metadata
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  businessPlan  BusinessPlan?
+  metrics       Metric[]
+  financialProjections FinancialProjection[]
+  alerts        FinancialAlert[]
+  goals         Goal[]
+
+  @@map("ventures")
+}
+
+model BusinessPlan {
+  id            String   @id @default(cuid())
+  ventureId     String   @unique
+  venture       Venture  @relation(fields: [ventureId], references: [id])
+
+  // Plan metadata
+  version       String   @default("1.0")
+  status        String?  // "DRAFT", "ACTIVE", "ARCHIVED"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Strategic content (JSON for flexibility)
+  problemDesc   String?  @db.Text
+  solutionDesc  String?  @db.Text
+  vision        String?  @db.Text
+  tagline       String?
+  oneLinePitch  String?
+
+  // Market analysis
+  TAM           Float?   // Total Addressable Market
+  SAM           Float?   // Serviceable Addressable Market
+  SOM           Float?   // Serviceable Obtainable Market
+
+  // Strategic targets (from business plan)
+  targetMRR     Float?   // "We aim for RM100k MRR by Dec 2026"
+  targetARR     Float?
+  targetCustomers Int?
+  targetDate    DateTime?
+
+  // Unit Economics Assumptions
+  expectedCAC   Float?   // "We assume RM350 CAC"
+  expectedLTV   Float?   // "We assume RM980 LTV"
+  expectedPayback Float? // "We assume 3 month payback"
+
+  // Financial Projections (from Business Plan)
+  revenueModel  String?  // Linked to actual revenue streams
+  unitEconomics Json?    // CAC, LTV targets
+
+  // Burn Rate Forecast
+  expectedBurnRate Float? // "We expect RM8k/month burn"
+  expectedRunway   Int?   // "We expect 18 months runway"
+
+  // POFW scoring
+  problemScore   Int?
+  opportunityScore Int?
+  feasibilityScore Int?
+  whyNowScore    Int?
+  pofwTotal      Int?
+
+  // Sync Status
+  lastSyncedAt   DateTime?
+  syncStatus     String?  // "IN_SYNC", "ACTUAL_BELOW_TARGET", "ACTUAL_ABOVE_TARGET"
+
+  @@map("business_plans")
+}
+
+model Metric {
+  id            String   @id @default(cuid())
+  ventureId     String
+  venture       Venture  @relation(fields: [ventureId], references: [id], onDelete: Cascade)
+
+  // Revenue Metrics
+  mrr           Float?
+  arr           Float?
+  customers     Int?
+  arpu          Float?   // Average Revenue Per User
+  growthRate    Float?   // MoM %
+  churnRate     Float?
+
+  // Unit Economics
+  cac           Float?   // Customer Acquisition Cost
+  ltv           Float?   // Lifetime Value
+  ltvCacRatio   Float?
+  paybackPeriod Float?   // months
+
+  // Expenses
+  expenses      Json?    // Detailed breakdown
+  totalExpenses Float?
+  burnRate      Float?
+
+  // Cash
+  cashBalance   Float?
+  runway        Int?     // months
+
+  // Comparison Fields (auto-calculated)
+  mrrVsTarget   Float?   // % difference from business plan target
+  burnVsForecast Float?  // % difference from expected burn
+  performanceStatus String? // "ON_TRACK", "LAGGING", "EXCEEDING"
+
+  date          DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([ventureId, date])
+  @@map("metrics")
+}
+
+model FinancialProjection {
+  id            String   @id @default(cuid())
+  name          String   // "Conservative 2026"
+  ventureId     String?
+  venture       Venture? @relation(fields: [ventureId], references: [id])
+
+  startDate     DateTime
+  endDate       DateTime
+  status        String?  // "ACTIVE", "OUTDATED", "ARCHIVED"
+  note          String?  @db.Text
+
+  // Assumptions (JSON)
+  assumptions   Json
+
+  // Projections (JSON array of monthly data)
+  projections   Json
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("financial_projections")
+}
+
+model FinancialAlert {
+  id            String   @id @default(cuid())
+  type          String   // "MRR_BELOW_TARGET", "BURN_EXCEEDS_FORECAST"
+  severity      String   // "INFO", "WARNING", "CRITICAL"
+
+  title         String
+  message       String   @db.Text
+  suggestedAction String? @db.Text
+
+  actionRequired Boolean @default(false)
+
+  // Link to entity
+  ventureId     String?
+  venture       Venture? @relation(fields: [ventureId], references: [id])
+
+  // Link back to Business Plan
+  relatedPlanSection String? // "gtmStrategy", "unitEconomics"
+
+  dismissedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([dismissedAt])
+  @@map("financial_alerts")
+}
+
+model Goal {
+  id            String   @id @default(cuid())
+  ventureId     String
+  venture       Venture  @relation(fields: [ventureId], references: [id], onDelete: Cascade)
+
+  title         String
+  description   String? @db.Text
+  targetValue   Float?
+  currentValue  Float?   @default(0)
+  unit          String?  // "RM", "customers", "%"
+
+  status        String?  // "NOT_STARTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"
+  priority      String?  // "LOW", "MEDIUM", "HIGH", "CRITICAL"
+
+  targetDate    DateTime?
+  completedAt   DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("goals")
+}
+
+// Personal Finance Models
+model FinancialSnapshot {
+  id            String   @id @default(cuid())
+
+  // Personal Income
+  income        Json?    // Detailed breakdown
+  salary        Float
+  bonuses       Float?
+  ventureIncome Json?    // Per-venture income
+  investmentIncome Float?
+
+  // Personal Expenses
+  expenses      Json?    // Detailed breakdown
+  personalExpenses Float
+  businessExpenses Float
+  debtPayment   Float?
+
+  // Assets
+  liquidCash    Float
+  stockValue    Float?
+  btcValue      Float?
+  cryptoValue   Float?
+  realEstateValue Float?
+  venturesValue Json?    // Per-venture valuation
+
+  // Liabilities
+  liabilities   Json?    // Detailed breakdown
+  totalLiabilities Float
+
+  // Calculated
+  totalAssets   Float
+  netWorth      Float
+  targetNetWorth Float?
+  progressPercent Float?
+
+  // Cash Flow
+  netCashFlow   Float
+  savingsRate   Float?
+  burnRate      Float?
+  runway        Int?     // months
+
+  // Date
+  month         Int
+  year          Int
+  date          DateTime
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([month, year])
+  @@index([date])
+  @@map("financial_snapshots")
+}
+
+model InvestmentPortfolio {
+  id            String   @id @default(cuid())
+  date          DateTime
+
+  // Summary
+  totalValue    Float
+  gainLoss      Float
+  gainLossPercent Float
+
+  // Holdings (JSON for flexibility)
+  stocks        Json?    // Array of stock holdings
+  crypto        Json?    // Array of crypto holdings
+
+  // Target Allocation
+  targetAllocation Json?
+  allocationDrift Json?
+
+  createdAt     DateTime @default(now())
+
+  @@index([date])
+  @@map("investment_portfolios")
+}
+
+model TreasurySnapshot {
+  id            String   @id @default(cuid())
+  date          DateTime
+
+  totalCash     Float
+  reserves      Float
+  deployable    Float
+
+  allocations   Json?    // Array of capital deployments
+  requests      Json?    // Array of pending requests
+  returns       Json?    // Array of returns received
+
+  createdAt     DateTime @default(now())
+
+  @@index([date])
+  @@map("treasury_snapshots")
+}

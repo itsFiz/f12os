@@ -12,10 +12,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
-  "dependencies": {
+    "dependencies": {
     "@prisma/client": "^6.17.1",
     "bcryptjs": "^2.4.3",
     "date-fns": "^4.1.0",
